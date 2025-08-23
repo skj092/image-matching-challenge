@@ -1,5 +1,13 @@
 # Image-Matching-Challenge
 
-## **SIFT + OpenCV**:
+## SIFT 
+<img width="1500" height="800" alt="Image" src="https://github.com/user-attachments/assets/0c03b531-1450-46b4-86e7-0c1bd2cd91d9" />
+
+## LightGlue and Disk
+![Image](https://github.com/user-attachments/assets/31faee91-c35f-49d3-aeb1-1bca7cf9016e)
+
+## LoFTR
+![Image](https://github.com/user-attachments/assets/782e8f1d-6d09-4622-a084-9eeb3d0d4c17)
+
 
 
