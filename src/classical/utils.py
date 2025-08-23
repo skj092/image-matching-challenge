@@ -2,6 +2,9 @@ import numpy as np
 import cv2
 import csv
 from collections import namedtuple
+import random
+from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 Gt = namedtuple('Gt', ['K', 'R', 'T'])
 eps = 1e-15
@@ -196,4 +199,92 @@ def LoadCalibration(filename):
             calib_dict[camera_id] = Gt(K=K, R=R, T=T)
 
     return calib_dict
+
+
+def load_images(scene_path):
+    images = {}
+    for filename in glob(f"{scene_path}/images/*.jpg"):
+        img_id = os.path.splitext(os.path.basename(filename))[0]
+        images[img_id] = cv2.cvtColor(cv2.imread(filename), cv2.COLOR_BGR2RGB)
+    return images
+
+def match_and_filter(kp1, desc1, kp2, desc2):
+    bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
+    matches = np.array([[m.queryIdx, m.trainIdx] for m in bf.match(desc1, desc2)])
+
+    pts1 = ArrayFromCvKps([kp1[m[0]] for m in matches])
+    pts2 = ArrayFromCvKps([kp2[m[1]] for m in matches])
+
+    F, mask = cv2.findFundamentalMat(
+        pts1, pts2, cv2.USAC_MAGSAC, 0.25, 0.99999, 10000
+    )
+    if F is None:
+        return None, None, None, None
+
+    mask = mask.astype(bool).flatten()
+    inlier_matches = matches[mask]
+    inlier_pts1 = ArrayFromCvKps([kp1[m[0]] for m in inlier_matches])
+    inlier_pts2 = ArrayFromCvKps([kp2[m[1]] for m in inlier_matches])
+    return F, inlier_pts1, inlier_pts2, inlier_matches
+
+def compute_pose_error(F, kp1, kp2, calib, id1, id2, scale):
+    E, R, T = ComputeEssentialMatrix(F, calib[id1].K, calib[id2].K, kp1, kp2)
+    q_pred = QuaternionFromMatrix(R)
+    T_pred = T.flatten()
+
+    R1, T1 = calib[id1].R, calib[id1].T.reshape((3, 1))
+    R2, T2 = calib[id2].R, calib[id2].T.reshape((3, 1))
+    dR_gt = R2 @ R1.T
+    dT_gt = (T2 - dR_gt @ T1).flatten()
+    q_gt = QuaternionFromMatrix(dR_gt)
+    q_gt = q_gt / (np.linalg.norm(q_gt) + eps)
+
+    return ComputeErrorForOneExample(q_gt, dT_gt, q_pred, T_pred, scale)
+
+def load_scaling_factors(path):
+    scaling = {}
+    with open(path) as f:
+        reader = csv.reader(f)
+        next(reader)  # skip header
+        for row in reader:
+            scaling[row[0]] = float(row[1])
+    return scaling
+
+# ----------------------------------------------------
+# Scene processing
+# ----------------------------------------------------
+def process_scene(scene, src, sift, scaling_dict, show_matches=False):
+    scene_path = f"{src}/{scene}"
+    covisibility = ReadCovisibilityData(f"{scene_path}/pair_covisibility.csv")
+    calib = LoadCalibration(f"{scene_path}/calibration.csv")
+
+    pairs = [p for p, cov in covisibility.items() if cov >= 0.1]
+    random.shuffle(pairs)
+    pairs = pairs[:50]  # cap
+
+    ids = list(set(sum([p.split("-") for p in pairs], [])))
+    images = {i: cv2.cvtColor(cv2.imread(f"{scene_path}/images/{i}.jpg"), cv2.COLOR_BGR2RGB) for i in ids}
+    kp, desc = {}, {}
+    for i in tqdm(ids, desc=f"Extracting features [{scene}]"):
+        kp[i], desc[i] = ExtractSiftFeatures(images[i], sift, 2000)
+
+    errors = {}
+    for pair in pairs:
+        id1, id2 = pair.split("-")
+        F, in1, in2, inlier_matches = match_and_filter(kp[id1], desc[id1], kp[id2], desc[id2])
+        if F is None:
+            continue
+
+        err_q, err_t = compute_pose_error(F, in1, in2, calib, id1, id2, scaling_dict[scene])
+        errors[pair] = (err_q, err_t)
+
+        if show_matches:
+            im = DrawMatches(images[id1], images[id2], ArrayFromCvKps(kp[id1]), ArrayFromCvKps(kp[id2]), inlier_matches)
+            plt.figure(figsize=(12, 12))
+            plt.imshow(im)
+            plt.title(f"{pair}: R err={err_q:.2f}°, T err={err_t:.2f}m")
+            plt.axis("off")
+            plt.savefig(f"tmp/{pair}.png")
+
+    return errors
 
