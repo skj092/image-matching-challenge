@@ -9,5 +9,8 @@
 ## LoFTR
 ![Image](https://github.com/user-attachments/assets/782e8f1d-6d09-4622-a084-9eeb3d0d4c17)
 
+## SuperGlue 
+![Image](https://github.com/user-attachments/assets/37cd26aa-06c3-46b7-9df3-68675f90b4b5)
+
 
 
