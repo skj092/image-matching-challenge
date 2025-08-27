@@ -7,7 +7,7 @@ import os
 import pandas as pd
 from pathlib import Path
 
-sys.path.append("external/DKM")
+sys.path.append("external/dkm")
 from dkm.utils.utils import tensor_to_pil
 
 from dkm import DKMv3_outdoor

@@ -21,12 +21,17 @@ import torch.nn.functional as F
 
 # ---- External deps expected on PYTHONPATH (as per your snippets) ----
 # DKM
-sys.path.append("external/DKM")
+FILE_DIR = Path(__file__).resolve().parent.parent.parent
+print("path is ", FILE_DIR)
+sys.path.append(str(FILE_DIR / "external/dkm"))
+sys.path.append(str(FILE_DIR / "external/superglue"))
+# sys.path.append("external/dkm")
 from dkm import DKMv3_outdoor
 from dkm.utils.utils import tensor_to_pil
 
 # SuperGlue
-sys.path.append("external/SuperGluePretrainedNetwork")
+# sys.path.append("external/superglue")
+
 from models.matching import Matching as SGMatching
 from models.utils import read_image as sg_read_image
 
@@ -84,10 +89,14 @@ def to_tensor_rgb01(img_bgr: np.ndarray, device: torch.device) -> torch.Tensor:
 
 def from_norm_coords_to_px(pts_norm: np.ndarray, w: int, h: int) -> np.ndarray:
     # DKM returns coords in [-1,1]; map to pixels
-    pts = pts_norm.copy()
+    if isinstance(pts_norm, torch.Tensor):
+        pts = pts_norm.detach().cpu().numpy()
+    else:
+        pts = np.asarray(pts_norm)
+
     pts[:, 0] = ((pts[:, 0] + 1.0) / 2.0) * w
     pts[:, 1] = ((pts[:, 1] + 1.0) / 2.0) * h
-    return pts
+    return pts.astype(np.float32)
 
 
 def rescale_points(pts: np.ndarray, scale: float) -> np.ndarray:
@@ -180,23 +189,29 @@ class SuperGlueWrapper:
         resize = [resize_max] if resize_max > 0 else [-1]
         image0, inp0, scales0 = sg_read_image(path1, self.device, resize, 0, self.resize_float)
         image1, inp1, scales1 = sg_read_image(path2, self.device, resize, 0, self.resize_float)
+
         pred = self.model({"image0": inp0, "image1": inp1})
         pred = {k: v[0].detach().cpu().numpy() for k, v in pred.items()}
+
         kpts0, kpts1 = pred["keypoints0"], pred["keypoints1"]
         matches, conf = pred["matches0"], pred["matching_scores0"]
         valid = matches > -1
+
         mk0 = kpts0[valid]
         mk1 = kpts1[matches[valid]]
-        # Back to original scale
-        mk0 = (mk0 / scales0[0][0]).astype(np.float32)
-        mk1 = (mk1 / scales1[0][0]).astype(np.float32)
+
+        # Back to original scale (per axis)
+        mk0 = (mk0 / np.array(scales0)).astype(np.float32)
+        mk1 = (mk1 / np.array(scales1)).astype(np.float32)
+
         return mk0, mk1
+
 
 
 class DKMWrapper:
     def __init__(self, device: torch.device):
         self.device = device
-        self.model = DKMv3_outdoor(pretrained=True).to(device).eval()
+        self.model = DKMv3_outdoor(device=self.device).eval()
 
     @torch.no_grad()
     def match(self, img1_bgr: np.ndarray, img2_bgr: np.ndarray, resize_max: int) -> Tuple[np.ndarray, np.ndarray]:
@@ -567,7 +582,7 @@ def dbscan_mkpt_crop_both_slices(img1: np.ndarray, img2: np.ndarray,
 
 def build_argparser():
     p = argparse.ArgumentParser(description="IMC 2022 – Two-stage Ensemble Pipeline (single file)")
-    p.add_argument("--src", type=str, default="/kaggle/input/image-matching-challenge-2022",
+    p.add_argument("--src", type=str, default="/teamspace/studios/this_studio/image-matching-challenge/data",
                    help="Dataset root containing test.csv and test_images/")
     p.add_argument("--out", type=str, default="submission.csv",
                    help="Output CSV path")

@@ -209,3 +209,5 @@ data/
 tmp/
 models
 external/
+*.csv
+.tmp_crops/
